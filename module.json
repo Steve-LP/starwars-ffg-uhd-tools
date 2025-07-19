@@ -1,0 +1,35 @@
+{
+  "id": "starwars-ffg-uhd-tools",
+  "title": "Starwars FFG UHD Tools",
+  "version": "1.0.0",
+  "compatibility": {
+    "minimum": "12",
+    "verified": "12"
+  },
+  "dependencies": [
+    {
+      "name": "socketlib",
+      "type": "module",
+      "id": "socketlib",
+      "manifest": "https://raw.githubusercontent.com/ruipin/foundry-socketlib/master/module.json",
+      "optional": false
+    }
+  ],
+  "url":      "https://github.com/Steve-LP/starwars-ffg-uhd-tools",
+  "manifest": "https://raw.githubusercontent.com/Steve-LP/starwars-ffg-uhd-tools/main/module.json",
+  "download": "https://github.com/Steve-LP/starwars-ffg-uhd-tools/archive/refs/heads/main.zip",
+  "systems": [
+    {
+      "name": "starwarsffg",
+      "type": "system",
+      "id": "starwarsffg",
+      "compatibility": {}
+    }
+  ],
+  "authors": [
+    { "name": "Steve", "flags": {} }
+  ],
+  "esmodules": [
+    "scripts/init.js"
+  ]
+}
