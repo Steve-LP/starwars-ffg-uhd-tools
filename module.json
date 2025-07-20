@@ -9,10 +9,10 @@
     }
   ],
   "compatibility": {
-    "minimum": "11",
-    "verified": "11"
+    "minimum": "12",
+    "verified": "12"
   },
-  "esmodules": ["init.js"],
+  "esmodules": ["scripts/init.js"],
   "relationships": {
     "requires": [
       {
