@@ -1,392 +1,233 @@
-// scripts/init.js
-/**
- * starwars-ffg-uhd-tools – Überarbeitete Version
- */
+// Name des Moduls: starwars-ffg-uhd-tools
+// init.js – Initialisierung und Hauptskript
+// Dieses Skript implementiert den "Kritischer Trefferwurf" (Crit Roll) für das Star Wars FFG UHD Tools Modul.
+// Es beinhaltet einen Dialog zur Modifikator-Eingabe, SocketLib-Kommunikation, TA-HUD Integration,
+// einen Button in der Szenen-Leiste sowie die Roll-Logik gemäß den Regeln.
+
+// Stelle sicher, dass SocketLib verfügbar ist und registriere das Modul.
+Hooks.once("socketlib.ready", () => {
+    // Überprüfen, ob das Modul korrekt geladen wurde
+    console.log("[SWFFGUHDTools] SocketLib erkannt, Modul registriere...");
+    // Registrierung bei SocketLib mit dem Modulnamen wie in module.json
+    window.SWFFGUHDTools.socket = socketlib.registerModule("starwars-ffg-uhd-tools");
+    // Registrierung der Crit Roll Funktion, die auf dem GM-Client ausgeführt wird
+    window.SWFFGUHDTools.socket.register("critRoll", window.SWFFGUHDTools._receiveCritRoll);
+});
+
 window.SWFFGUHDTools = {
-    MODULE_ID: "starwars-ffg-uhd-tools",
+    socket: null,  // SocketLib-Instanz
 
-    /** GM‑Listener auf native Sockets */
-    registerSocketListener() {
-        if (!game.user.isGM) return;
-        console.log("🚨 UHD‑TOOLS | GM Native Socket‑Listener registrieren");
-
-        // Socket-Listener registrieren
-        game.socket.on(`module.${this.MODULE_ID}`, async (payload) => {
-            console.log("🚨 UHD‑TOOLS | Socket-Event empfangen:", payload);
-            try {
-                await this.handleSocketPayload(payload);
-            } catch (error) {
-                console.error("🚨 UHD‑TOOLS | Fehler beim Verarbeiten des Socket-Events:", error);
-                ui.notifications.error("Fehler beim Verarbeiten des Critical Roll-Events");
-            }
-        });
-    },
-
-    /** Dialog‑Launcher für alle Benutzer (einheitliche Mechanik) */
-    showCriticalDialog() {
-        // 1) Kontrolliertes Token prüfen (Source/Angreifer)
-        const controlled = canvas.tokens.controlled;
-        if (!controlled || controlled.length === 0) {
-            ui.notifications.warn("Wähle zuerst das angreifende Token aus!");
+    // Funktion zum Öffnen des Dialogs für einen kritischen Trefferwurf
+    showCritDialog: function() {
+        // Überprüfe, ob SocketLib aktiv ist
+        if (!window.socketlib || !window.SWFFGUHDTools.socket) {
+            ui.notifications.error("SWFFG UHD Tools benötigt das SocketLib-Modul.", {permanent: false});
+            console.error("[SWFFGUHDTools] SocketLib nicht gefunden!");
             return;
         }
-        if (controlled.length > 1) {
-            ui.notifications.warn("Wähle nur ein angreifendes Token aus!");
-            return;
-        }
-
-        // 2) Ziel-Token prüfen - Genau ein Ziel erforderlich
-        const targets = Array.from(game.user.targets);
-        if (!targets || targets.length === 0) {
-            ui.notifications.warn("Targete genau einen Gegner!");
-            return;
-        }
-        if (targets.length > 1) {
-            ui.notifications.warn("Du kannst nur ein Ziel für Critical Damage auswählen!");
-            return;
-        }
-
-        const sourceToken = controlled[0];
-        const targetToken = targets[0];
-
-        // 3) Actor-Validierung
-        if (!sourceToken.actor) {
-            ui.notifications.warn("Das angreifende Token hat keinen Actor!");
-            return;
-        }
-        if (!targetToken.actor) {
-            ui.notifications.warn("Das Ziel-Token hat keinen Actor!");
-            return;
-        }
-
-        // 4) Verhindere Selbst-Targeting
-        if (sourceToken.id === targetToken.id) {
-            ui.notifications.warn("Ein Token kann sich nicht selbst angreifen!");
-            return;
-        }
-
-        // Einheitlicher Dialog für alle Benutzer
+        // Dialoginhalt (HTML) mit Eingabefeld für Modifikator
+        let content = `<p>Geben Sie einen Modifikator für den kritischen Trefferwurf ein:</p>
+        <div class="form-group">
+        <label>Modifikator:</label>
+        <input type="number" id="crit-mod" name="crit-mod" value="0"/>
+        </div>`;
+        // Erzeuge und zeige Dialog
         new Dialog({
-            title: "Critical Injury/Damage",
-            content: `
-            <div style="margin-bottom: 10px;">
-            <p><strong>Von:</strong> ${sourceToken.name} (${sourceToken.actor.type})</p>
-            <p><strong>Ziel:</strong> ${targetToken.name} (${targetToken.actor.type})</p>
-            </div>
-            <div>
-            <label for="critMod">Modifikator:</label>
-            <input type="number" id="critMod" value="0" style="width:80px; margin-left: 10px;"/>
-            </div>
-            `,
+            title: "Kritischer Trefferwurf",
+            content: content,
             buttons: {
-                apply: {
-                    label: "Anwenden",
+                roll: {
+                    icon: '<i class="fas fa-dice-d20"></i>',
+                    label: "Würfeln",
                     callback: html => {
-                        const mod = parseInt(html.find("#critMod").val()) || 0;
-                        const payload = {
-                            type: "critroll",
-                            userId: game.user.id,
-                            sourceId: sourceToken.id,
-                            targetId: targetToken.id,
-                            critMod: mod,
-                            timestamp: Date.now()
-                        };
-
-                        if (game.user.isGM) {
-                            // GM führt direkt aus
-                            console.log("🚨 UHD‑TOOLS | GM-Modus: Direkte Ausführung");
-                            this.applyCritical(payload);
-                        } else {
-                            // Spieler sendet an GM
-                            console.log("🚨 UHD‑TOOLS | Spieler-Event wird gesendet:", payload);
-                            game.socket.emit(`module.${this.MODULE_ID}`, payload);
-                            ui.notifications.info(`Crit‑Roll an GM gesendet (Mod = ${mod})`);
-                        }
+                        // Lese den Modifikator aus dem Eingabefeld
+                        const mod = parseInt(html.find('input[name="crit-mod"]').val()) || 0;
+                        // Starte den Crit Roll
+                        window.SWFFGUHDTools._sendCritRoll(mod);
                     }
                 },
                 cancel: {
+                    icon: '<i class="fas fa-times"></i>',
                     label: "Abbrechen",
-                   callback: () => {
-                       console.log("🚨 UHD‑TOOLS | Dialog abgebrochen");
-                   }
+                    callback: () => {
+                        console.log("[SWFFGUHDTools] Kritischer Trefferwurf abgebrochen.");
+                    }
                 }
             },
-            default: "apply"
+            default: "roll"
         }).render(true);
     },
 
-    /** Die eigentliche Crit‑Logik */
-    async applyCritical({ sourceId, targetId, critMod, userId }) {
-        console.log("🚨 UHD‑TOOLS | applyCritical aufgerufen mit:", { sourceId, targetId, critMod, userId });
-
-        // KORRIGIERT: Ziel-Token finden (nicht Source!)
-        const targetToken = canvas.tokens.get(targetId);
-        if (!targetToken) {
-            console.error("🚨 UHD‑TOOLS | Ziel-Token nicht gefunden:", targetId);
-            ui.notifications.error(`Ziel-Token ${targetId} nicht gefunden.`);
+    // Methode, die vom Button/Kommando aufgerufen wird, um Crit-Roll an GM zu senden
+    _sendCritRoll: async function(userMod) {
+        // Bestimme angreifendes Token (kontrolliert) und Ziel-Token (exakt eines)
+        const controlled = canvas.tokens.controlled;
+        const targets = Array.from(game.user.targets);
+        // Fehlerbehandlung: genau ein Ziel muss markiert sein
+        if (targets.length !== 1) {
+            ui.notifications.error("Bitte ziele genau ein anderes Token an.", {permanent: false});
+            console.warn("[SWFFGUHDTools] Ungültige Zielanzahl:", targets.length);
             return;
         }
-
-        // KORRIGIERT: Ziel-Actor verwenden
-        const targetActor = targetToken.actor;
-        if (!targetActor) {
-            console.error("🚨 UHD‑TOOLS | Ziel-Actor nicht gefunden für Token:", targetId);
-            ui.notifications.error("Ziel-Actor nicht gefunden!");
+        // Mindestens ein kontrolliertes Token (Angreifer) muss existieren
+        if (controlled.length < 1) {
+            ui.notifications.error("Kein eigenes Token ausgewählt!", {permanent: false});
+            console.warn("[SWFFGUHDTools] Kein kontrolliertes Token gefunden!");
             return;
         }
-
-        // Source-Token für Chat-Ausgabe und Durable-Berechnung
-        const sourceToken = sourceId ? canvas.tokens.get(sourceId) : null;
-        const sourceActor = sourceToken?.actor;
-
+        // Angreifer-Token und Ziel-Token
+        const attackerToken = controlled[0];
+        const targetToken = targets[0];
+        // Sende Daten über SocketLib an GM
         try {
-
-            // === Neuer Abschnitt in applyCritical ===
-            // 1. Anzahl bereits vorhandener Crit‑Items auf dem Ziel zählen
-            const existingCrits = targetActor.items
-            .filter(i => ["criticalinjury","criticaldamage"].includes(i.type))
-            .length;
-            // Automatischer Mod: 10 pro vorhandenem Crit
-            const autoCritMod = existingCrits * 10;
-            console.log("🚨 UHD‑TOOLS | Existierende Crits auf Ziel:", existingCrits, "→ +"+autoCritMod);
-
-            // KORRIGIERT ZURÜCK: Durable-Count vom ANGREIFER-Actor berechnen (wie ursprünglich)
-            let countDurable = 0;
-            const actorForDurable = targetActor; // Fallback auf Target wenn kein Source
-
-            for (const item of actorForDurable.items) {
-                const coll = item.system?.collection;
-                if (coll) {
-                    countDurable += Object.values(coll).filter(e => e.name.toLowerCase() === "durable").length;
-                }
-                if (item.name.toLowerCase().includes("durable")) {
-                    countDurable++;
-                }
-            }
-            const durableMod = countDurable * 10;
-
-            console.log("🚨 UHD‑TOOLS | Durable-Count vom Angreifer:", countDurable, "Bonus:", durableMod, "Actor:", actorForDurable.name);
-
-            // Würfel mit Durable als positiven Bonus (höhere Crits)
-            const roll = new Roll("1d100 + @manual + @auto - @dur", {
-                manual: critMod,
-                auto:   autoCritMod,
-                dur:    durableMod
+            await window.SWFFGUHDTools.socket.executeAsGM("critRoll", {
+                attackerId: attackerToken.id,
+                targetId: targetToken.id,
+                userId: game.user.id,
+                userName: game.user.name,
+                mod: userMod
             });
-            await roll.evaluate({ async: true });
-
-            // Roll-Message mit Flavor - Zeige Source und Target, Durable als Bonus
-            const userName = game.users.get(userId)?.name || "Unbekannt";
-            const flavor = `🎲 ${userName} würfelt gegen ${targetToken.name}: ` +
-            `1d100 + ${critMod} (manuell) + ${autoCritMod} (vorh. Crits) – ${durableMod} (Durable)`;
-
-            await roll.toMessage({
-                speaker: ChatMessage.getSpeaker({ actor: targetActor }),
-                                 flavor
+            console.log("[SWFFGUHDTools] Kritischer Trefferwurf gesendet an GM:", {
+                attacker: attackerToken.id, target: targetToken.id, mod: userMod
             });
-
-            // Tabellen-Draw & Item-Eintrag - KORRIGIERT: Basiert auf Ziel-Actor-Type
-            const finalTotal = Math.max(roll.total, 1);
-            const tableName = targetActor.type === "vehicle" ? "Critical Damage" : "Critical Injuries";
-            const table = game.tables.getName(tableName);
-
-            if (!table) {
-                console.error("🚨 UHD‑TOOLS | Tabelle nicht gefunden:", tableName);
-                ui.notifications.error(`Tabelle "${tableName}" nicht gefunden.`);
-                return;
-            }
-
-            console.log("🚨 UHD‑TOOLS | Verwende Tabelle:", tableName, "mit Roll:", finalTotal);
-
-            // Draw von der Tabelle
-            const draw = await table.draw({roll: new Roll(`${finalTotal}`), displayChat: false});
-            const entry = draw.results?.[0];
-
-            if (!entry) {
-                console.error("🚨 UHD‑TOOLS | Kein Tabellen-Eintrag gefunden");
-                ui.notifications.warn("Kein Tabellen‑Eintrag.");
-                return;
-            }
-
-            // Item finden
-            const item = game.items.get(entry.documentId);
-            if (!item) {
-                console.error("🚨 UHD‑TOOLS | Item nicht gefunden:", entry.documentId);
-                ui.notifications.error("Item nicht gefunden.");
-                return;
-            }
-
-            console.log("🚨 UHD‑TOOLS | Füge Item hinzu:", item.name, "zu", targetActor.name);
-
-            // KORRIGIERT: Item zum ZIEL-Actor hinzufügen
-            await targetActor.createEmbeddedDocuments("Item", [item.toObject()]);
-
-            // Ziel-Meldung mit klickbarem Link - KORRIGIERT: Zeige klar das Ziel
-            const speakerTarget = {alias: targetToken.name, token: targetToken.id, scene: canvas.scene.id};
-            const resultMessage = sourceToken && sourceToken.id !== targetToken.id
-            ? `🔔 **${targetToken.name}** erleidet durch ${sourceToken.name}: **@Item[${item.id}]{${item.name}}**`
-            : `🔔 **${targetToken.name}** erhält: **@Item[${item.id}]{${item.name}}**`;
-
-            await ChatMessage.create({
-                speaker: speakerTarget,
-                content: resultMessage
-            });
-
-            console.log("🚨 UHD‑TOOLS | Critical Roll erfolgreich abgeschlossen für:", targetActor.name);
-
         } catch (error) {
-            console.error("🚨 UHD‑TOOLS | Fehler beim Critical Roll:", error);
-            ui.notifications.error("Fehler beim Critical Roll!");
+            // Wenn kein GM verfügbar oder Fehler
+            ui.notifications.error("Fehler beim Senden des Crit-Rolls. Ist ein GM online?", {permanent: false});
+            console.error("[SWFFGUHDTools] Fehler bei SocketLib.executeAsGM:", error);
         }
     },
 
-    /** Socket-Payload für GM verarbeiten */
-    async handleSocketPayload(payload) {
-        console.log("🚨 UHD‑TOOLS | Socket-Payload empfangen:", payload);
-
-        if (payload.type === "critroll") {
-            await this.applyCritical(payload);
-        } else {
-            console.warn("🚨 UHD‑TOOLS | Unbekannter Payload-Type:", payload.type);
+    // Funktion, die vom GM ausgeführt wird, wenn ein Crit-Roll hereinkommt
+    _receiveCritRoll: async function(data) {
+        // Datenstruktur: {attackerId, targetId, userId, userName, mod}
+        console.log("[SWFFGUHDTools] Crit-Roll erhalten:", data);
+        // Finde Token-Objekte anhand der IDs
+        const attackerToken = canvas.tokens.get(data.attackerId);
+        const targetToken = canvas.tokens.get(data.targetId);
+        if (!attackerToken || !targetToken) {
+            console.error("[SWFFGUHDTools] Angreifer- oder Ziel-Token nicht gefunden!");
+            return;
         }
+        // Berechne vorhandene Krits und Durable
+        const critCount = window.SWFFGUHDTools.countExistingCrits(targetToken);
+        const durableRank = window.SWFFGUHDTools.getDurableRank(targetToken);
+        // Automatischer Modifikator: +10 pro vorhandenem Krit
+        let autoBonus = critCount * 10;
+        // Durable reduziert den Effekt: -10 pro Rang
+        let durablePenalty = durableRank * 10;
+        // Berechne Gesamtergebnis: d100 + (ManuellerMod + autoBonus - durablePenalty)
+        let rollFormula = `1d100 + (${data.mod} + ${autoBonus} - ${durablePenalty})`;
+        const roll = new Roll(rollFormula).roll({async: false});
+        const total = roll.total;
+        console.log(`[SWFFGUHDTools] Würfelergebnis (inkl. Modifikatoren): ${total}`);
+        // Ergebnisse zusammenstellen (Chat-Message)
+        let chatContent = `<b>${data.userName} führt einen kritischen Trefferwurf gegen ${targetToken.name} durch!</b><br>`;
+        chatContent += `Würfelergebnis: <b>${total}</b> `;
+        chatContent += `(Modifikatoren: ${data.mod} + ${autoBonus} (vorh. Krit) - ${durablePenalty} (Durable))<br>`;
+        // Verursachtes Item bzw. kritischen Zustand ermitteln (Platzhalter, da Implementierung je nach Regelwerk variiert)
+        // Hier könnte man z.B. über eine Rolltabelle oder vordefinierte Gegenstände gehen.
+        // Für dieses Beispiel fügen wir einfach einen Platzhalter-Text ein.
+        chatContent += `<i>Infizierter kritischer Zustand: __Hier Item einsetzen__</i>`;
+        // Chat-Nachricht erstellen (als öffentlicher Beitrag)
+        ChatMessage.create({content: chatContent});
+        console.log("[SWFFGUHDTools] Chat-Eintrag erstellt für kritischen Trefferwurf.");
+        // Aktualisiere Anzahl der bestehenden Krits auf dem Ziel (Flag)
+        await targetToken.actor.setFlag("starwars-ffg-uhd-tools", "critCount",
+                                        critCount + 1);
+    },
+
+    // Hilfsfunktion: Zähle vorhandene Krit-Treffer auf einem Token (über Flag oder Effekte)
+    // Hier: Verwende ein Actor-Flag als Zähler.
+    countExistingCrits: function(token) {
+        if (!token.actor) return 0;
+        const stored = token.actor.getFlag("starwars-ffg-uhd-tools", "critCount");
+        return Number(stored) || 0;
+    },
+
+    // Hilfsfunktion: Ermittle den Rang des Talents "Durable" auf dem Ziel
+    getDurableRank: function(token) {
+        if (!token.actor) return 0;
+        // Versuche, das Talent "Durable" bei den Items des Actors zu finden
+        const durableItem = token.actor.items.find(i => i.name === "Durable");
+        if (!durableItem) return 0;
+        // Annahme: Das Talent hat eine Eigenschaft data.data.ranks oder data.data.rank
+        // Je nach System (Genesys/FFG) könnte dies variieren; wir versuchen beides.
+        const data = durableItem.data.data;
+        const rank = data.ranks ?? data.rank ?? 0;
+        return Number(rank);
+    },
+
+    // Einrichtung des SceneControl-Buttons
+    setupSceneControl: function(controls) {
+        // Definiere Werkzeuge für dieses Modul (hier nur ein Tool: Crit Roll)
+        const tools = [
+            {
+                name: "critRoll",
+                title: "Kritischer Trefferwurf",
+                icon: "fas fa-bolt",
+                // Bei Klick Dialog öffnen
+                onClick: () => { window.SWFFGUHDTools.showCritDialog(); },
+                button: true
+            }
+        ];
+        // Füge einen neuen Abschnitt "UHD Tools" in der Symbolleiste hinzu
+        controls.push({
+            name: "uhd-tools",
+            title: "UHD Tools",
+            icon: "fas fa-tools",
+            layer: "token",
+            tools: tools,
+            visible: true
+            // Optional: Reihenfolge (0 = zuerst, 100 = zuletzt)
+            // order: 50
+        });
+    },
+
+    // (Optionale) Integration in Token Action HUD (TA-HUD Core)
+    setupTokenActionHud: function() {
+        // Prüfe, ob Token Action HUD Core geladen ist
+        const tahCore = game.modules.get("token-action-hud-core")?.active;
+        if (!tahCore) {
+            console.warn("[SWFFGUHDTools] Token Action HUD nicht gefunden oder nicht aktiv.");
+            return;
+        }
+        // Token Action HUD Core Integration (Registerung des SystemManagers)
+        Hooks.once('tokenActionHudCoreApiReady', (coreModule) => {
+            console.log("[SWFFGUHDTools] Token Action HUD Core API bereit.");
+            // Definiere eine minimale SystemManager-Klasse (TA-HUD erfordert diese Struktur)
+            class UHDSystemManager extends coreModule.api.SystemManager {
+                static getActionHandler() { return null; }
+                static getAvailableRollHandlers() { return []; }
+                static getRollHandler() { return null; }
+                static registerDefaults() {
+                    // Keine vorgefertigten Layouts oder Gruppen, nur integrierte Crit-Funktion
+                    return {layout: [], groups: []};
+                }
+            }
+            const module = game.modules.get("starwars-ffg-uhd-tools");
+            module.api = {
+                requiredCoreModuleVersion: "2.0.0",
+                SystemManager: UHDSystemManager
+            };
+            Hooks.call('tokenActionHudSystemReady', module);
+            console.log("[SWFFGUHDTools] TA-HUD SystemManager registriert.");
+        });
     }
 };
 
-// ─── Hooks direkt im obersten Scope ───
-
-// 1) TA‑HUD Core Integration
-Hooks.once("tokenActionHudCoreApiReady", (coreModule) => {
-    console.log("🚨 UHD‑TOOLS | TA‑HUD Core API Ready");
-    console.log("🚨 UHD‑TOOLS | Core Module:", coreModule);
-
-    try {
-        // Prüfe verfügbare Methoden
-        if (typeof coreModule.registerSystem === 'function') {
-            coreModule.registerSystem({
-                id: "udhtools",
-                name: "UDH Tools",
-                actions: [{
-                    id: "critroll",
-                    name: "Crit Roll",
-                    type: "button",
-                    icon: "fas fa-bolt",
-                    enabled: (token) => {
-                        if (!token || !token.actor) return false;
-                        if (game.user.isGM) return true; // GM kann immer
-                        return ["character", "vehicle", "nemesis", "rival"].includes(token.actor.type);
-                    },
-                    onClick: (token) => {
-                        console.log("🚨 UHD‑TOOLS | TA-HUD Button geklickt für:", token?.name);
-                        SWFFGUHDTools.showCriticalDialog();
-                    }
-                }]
-            });
-            console.log("🚨 UHD‑TOOLS | Crit‑Roll Action in TA‑HUD registriert");
-        } else if (typeof coreModule.api?.registerSystem === 'function') {
-            // Alternative API-Struktur
-            coreModule.api.registerSystem({
-                id: "udhtools",
-                name: "UDH Tools",
-                actions: [{
-                    id: "critroll",
-                    name: "Crit Roll",
-                    type: "button",
-                    icon: "fas fa-bolt",
-                    enabled: (token) => {
-                        if (!token || !token.actor) return false;
-                        if (game.user.isGM) return true;
-                        return ["character", "vehicle", "nemesis", "rival"].includes(token.actor.type);
-                    },
-                    onClick: (token) => {
-                        console.log("🚨 UHD‑TOOLS | TA-HUD Button geklickt für:", token?.name);
-                        SWFFGUHDTools.showCriticalDialog();
-                    }
-                }]
-            });
-            console.log("🚨 UHD‑TOOLS | Crit‑Roll Action in TA‑HUD registriert (via api)");
-        } else {
-            console.warn("🚨 UHD‑TOOLS | Keine passende registerSystem-Methode gefunden");
-            console.log("🚨 UHD‑TOOLS | Verfügbare Methoden:", Object.keys(coreModule));
-            // TA-HUD Integration überspringen, Scene Controls funktionieren trotzdem
-        }
-
-    } catch (error) {
-        console.error("🚨 UHD‑TOOLS | Fehler beim Registrieren der TA-HUD Action:", error);
-        console.log("🚨 UHD‑TOOLS | Modul funktioniert weiterhin über Scene Controls");
-    }
-});
-
-// 2) Szene‑Kontrollleiste (Scene Controls)
+// Beim Laden des Canvas: Szene-Kontrollbuttons hinzufügen
 Hooks.on("getSceneControlButtons", (controls) => {
-    const tokenCtrl = controls.find(c => c.name === "token");
-    if (!tokenCtrl) {
-        console.warn("🚨 UHD‑TOOLS | Token-Control nicht gefunden");
-        return;
-    }
-
-    // Verhindere Duplikate
-    if (tokenCtrl.tools.some(t => t.name === "udhtools")) {
-        console.log("🚨 UHD‑TOOLS | Scene-Control-Button bereits vorhanden, überspringe");
-        return;
-    }
-
-    tokenCtrl.tools.push({
-        name: "udhtools",
-        title: "UDH Tools - Critical Roll",
-        icon: "fas fa-bolt",
-        visible: game.user.role >= CONST.USER_ROLES.PLAYER,
-        onClick: () => {
-            console.log("🚨 UHD‑TOOLS | Scene-Control-Button geklickt");
-            SWFFGUHDTools.showCriticalDialog();
-        },
-        button: true
-    });
-
-    console.log("🚨 UHD‑TOOLS | Scene‑Control‑Button registriert");
+    window.SWFFGUHDTools.setupSceneControl(controls);
 });
 
-// 3) Init & Ready
-Hooks.once("init", () => {
-    console.log("🚨 UHD‑TOOLS | init hook ausgelöst");
-
-    // Modul-Einstellungen registrieren (optional)
-    game.settings.register(SWFFGUHDTools.MODULE_ID, "debugMode", {
-        name: "Debug Mode",
-        hint: "Aktiviert erweiterte Konsolen-Ausgaben",
-        scope: "world",
-        config: true,
-        type: Boolean,
-        default: false
-    });
-});
-
+// Beim Fertigstellen des Setups: Token Action HUD Integration aufsetzen
 Hooks.once("ready", () => {
-    console.log("🚨 UHD‑TOOLS | ready hook ausgelöst");
-
-    // Socket-Listener registrieren
-    SWFFGUHDTools.registerSocketListener();
-
-    // Bestätigung, dass das Modul geladen wurde
-    ui.notifications.info("UDH Tools geladen!");
-
-    // Debug-Info
-    if (game.settings.get(SWFFGUHDTools.MODULE_ID, "debugMode")) {
-        console.log("🚨 UHD‑TOOLS | Debug-Modus aktiv");
-        console.log("🚨 UHD‑TOOLS | User ist GM:", game.user.isGM);
-        console.log("🚨 UHD‑TOOLS | Verfügbare Tokens:", canvas.tokens.controlled.length);
+    // Überprüfe SocketLib
+    if (!game.modules.get("socketlib")?.active) {
+        ui.notifications.error("SWFFG UHD Tools benötigt das SocketLib-Modul!");
+        console.error("[SWFFGUHDTools] SocketLib-Modul ist nicht aktiv!");
     }
-});
-
-// 4) Zusätzliche Hooks für bessere Integration
-Hooks.on("controlToken", (token, controlled) => {
-    if (controlled && game.settings.get(SWFFGUHDTools.MODULE_ID, "debugMode")) {
-        console.log("🚨 UHD‑TOOLS | Token ausgewählt:", token.name, "Type:", token.actor?.type);
-    }
-});
-
-// 5) Fehlerbehandlung
-Hooks.on("error", (error) => {
-    if (error.message && error.message.includes("UHD‑TOOLS")) {
-        console.error("🚨 UHD‑TOOLS | Modul-Fehler:", error);
-    }
+    // TA-HUD Integration versuchen
+    window.SWFFGUHDTools.setupTokenActionHud();
+    console.log("[SWFFGUHDTools] Modul bereit.");
 });
