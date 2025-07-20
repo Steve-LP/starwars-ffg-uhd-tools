@@ -3,7 +3,6 @@
   "title": "Star Wars FFG UHD Tools",
   "description": "Hilfsfunktionen für Crits und mehr im FFG-System",
   "version": "1.0.0",
-  "socket": "true",
   "authors": [
     {
       "name": "Steve LP"
