@@ -1,28 +1,32 @@
 {
   "id": "starwars-ffg-uhd-tools",
-  "title": "Star Wars FFG UHD Tools",
-  "description": "Hilfsfunktionen für Crits und mehr im FFG-System",
-  "version": "1.0.0",
-  "authors": [
-    {
-      "name": "Steve LP"
-    }
-  ],
+  "title": "Starwars FFG UHD Tools",
+  "version": "1.0.1",
   "compatibility": {
     "minimum": "12",
     "verified": "12"
   },
-  "esmodules": ["scripts/init.js"],
-  "relationships": {
-    "requires": [
-      {
-        "id": "socketlib",
-        "type": "module",
-        "manifest": "https://raw.githubusercontent.com/manuelVo/foundryvtt-socketlib/main/module.json"
-      }
-    ]
-  },
-  "url": "https://github.com/Steve-LP/starwars-ffg-uhd-tools",
-  "manifest": "https://raw.githubusercontent.com/Steve-LP/starwars-ffg-uhd-tools/main/module.json",
-  "download": "https://github.com/Steve-LP/starwars-ffg-uhd-tools/archive/refs/heads/main.zip"
+  "dependencies": [
+    {
+      "name": "socketlib",
+      "type": "module",
+      "id": "socketlib",
+      "manifest": "https://raw.githubusercontent.com/ruipin/foundry-socketlib/master/module.json",
+      "optional": false
+    }
+  ],
+  "systems": [
+    {
+      "name": "starwarsffg",
+      "type": "system",
+      "id": "starwarsffg",
+      "compatibility": {}
+    }
+  ],
+  "authors": [
+    { "name": "Steve", "flags": {} }
+  ],
+  "esmodules": [
+    "scripts/init.js"
+  ]
 }
