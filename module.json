@@ -12,10 +12,11 @@
         "type": "module",
         "id": "socketlib",
         "manifest": "https://raw.githubusercontent.com/Steve-LP/starwars-ffg-uhd-tools/main/module.json",
-        "download": "https://github.com/Steve-LP/starwars-ffg-uhd-tools/releases/download/v1.0.2/module.zip",
+        "download": "https://github.com/Steve-LP/starwars-ffg-uhd-tools/releases/download/v1.0.3/module.zip",
         "optional": false
       }
     ],
+    "socket": true,
     "systems": [
       {
         "name": "starwarsffg",
